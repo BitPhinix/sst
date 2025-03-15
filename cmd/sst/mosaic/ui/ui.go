@@ -571,6 +571,9 @@ func (u *UI) functionName(functionID string) string {
 		if resource.Type == "sst:cloudflare:Worker" && resource.URN.Name() == functionID {
 			return resource.Outputs["_metadata"].(map[string]interface{})["handler"].(string)
 		}
+		if resource.Type == "sst:cloudflare5:Worker" && resource.URN.Name() == functionID {
+			return resource.Outputs["_metadata"].(map[string]interface{})["handler"].(string)
+		}
 	}
 	return functionID
 }
