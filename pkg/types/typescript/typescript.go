@@ -13,11 +13,12 @@ import (
 )
 
 var mapping = map[string]string{
-	"r2BucketBindings":    "R2Bucket",
-	"d1DatabaseBindings":  "D1Database",
-	"kvNamespaceBindings": "KVNamespace",
-	"queueBindings":       "Queue",
-	"serviceBindings":     "Service",
+	"r2BucketBindings":               "R2Bucket",
+	"d1DatabaseBindings":             "D1Database",
+	"kvNamespaceBindings":            "KVNamespace",
+	"queueBindings":                  "Queue",
+	"serviceBindings":                "Service",
+	"durableObjectNamespaceBindings": "DurableObjectNamespace",
 }
 
 func Generate(root string, links common.Links) error {

@@ -54,6 +54,12 @@ export interface R2BucketBinding {
     bucketName: Input<string>;
   };
 }
+export interface DurableObjectNamespaceBinding {
+  type: "durableObjectNamespaceBindings";
+  properties: {
+    className: Input<string>;
+  };
+}
 
 export interface D1DatabaseBinding {
   type: "d1DatabaseBindings";
@@ -69,7 +75,8 @@ export type Binding =
   | PlainTextBinding
   | QueueBinding
   | R2BucketBinding
-  | D1DatabaseBinding;
+  | D1DatabaseBinding
+  | DurableObjectNamespaceBinding;
 
 export function binding<T extends Binding["type"]>(input: Binding & {}) {
   return {

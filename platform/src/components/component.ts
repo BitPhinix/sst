@@ -176,6 +176,7 @@ export class Component extends ComponentResource {
               "cloudflare:index/record:Record",
               "cloudflare:index/workerCronTrigger:WorkerCronTrigger",
               "cloudflare:index/workerDomain:WorkerDomain",
+              "cloudflare:index/workersCustomDomain:WorkersCustomDomain",
               "docker-build:index:Image",
               "vercel:index/dnsRecord:DnsRecord",
             ].includes(args.type)
@@ -303,6 +304,11 @@ export class Component extends ComponentResource {
             "cloudflare:index/r2Bucket:R2Bucket": ["name", 64, { lower: true }],
             "cloudflare:index/workerScript:WorkerScript": [
               "name",
+              64,
+              { lower: true },
+            ],
+            "cloudflare:index/workersScript:WorkersScript": [
+              "scriptName",
               64,
               { lower: true },
             ],
