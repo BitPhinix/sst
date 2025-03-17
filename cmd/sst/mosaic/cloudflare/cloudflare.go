@@ -1,14 +1,22 @@
 package cloudflare
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
 
 	"github.com/cloudflare/cloudflare-go"
+	cloudflare4 "github.com/cloudflare/cloudflare-go/v4"
+	"github.com/cloudflare/cloudflare-go/v4/option"
+	"github.com/cloudflare/cloudflare-go/v4/workers"
 	"github.com/gorilla/websocket"
 	"github.com/sst/sst/v3/cmd/sst/mosaic/watcher"
 	"github.com/sst/sst/v3/internal/util"
@@ -122,7 +130,6 @@ exit:
 						builds[target.FunctionID] = output
 						var properties worker.Properties
 						json.Unmarshal(target.Properties, &properties)
-						account := cloudflare.AccountIdentifier(properties.AccountID)
 
 						content, err := os.ReadFile(filepath.Join(output.Out, output.Handler))
 						if err != nil {
@@ -130,13 +137,50 @@ exit:
 							continue
 						}
 						slog.Info("updating worker script", "functionID", target.FunctionID)
-						_, err = api.UpdateWorkersScriptContent(ctx, account, cloudflare.UpdateWorkersScriptContentParams{
-							ScriptName: properties.ScriptName,
-							Script:     string(content),
-							Module:     true,
-						})
+						client := cloudflare4.NewClient()
+						formData := &bytes.Buffer{}
+						writer := multipart.NewWriter(formData)
+						metadata := workers.WorkerMetadataParam{
+							MainModule: cloudflare4.F("worker.js"),
+						}
+						metadataBytes, err := json.Marshal(metadata)
+						if err != nil {
+							slog.Info("error creating part", "error", err)
+							continue
+						}
+						err = writer.WriteField("metadata", string(metadataBytes))
+						if err != nil {
+							slog.Info("error creating part", "error", err)
+							continue
+						}
+						h := textproto.MIMEHeader{}
+						h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, "script", "worker.js"))
+						h.Set("Content-Type", "application/javascript+module")
+						part, err := writer.CreatePart(h)
+						if err != nil {
+							slog.Info("error creating part", "error", err)
+							continue
+						}
+						_, err = part.Write(content)
+						if err != nil {
+							log.Fatalf("Error writing content: %v", err)
+						}
+						writer.Close()
+						params := workers.ScriptContentUpdateParams{
+							AccountID:              cloudflare4.F(properties.AccountID),
+							CfWorkerMainModulePart: cloudflare4.F("worker.js"),
+						}
+						result, err := client.Workers.Scripts.Content.Update(
+							ctx,
+							properties.ScriptName,
+							params,
+							option.WithRequestBody(writer.FormDataContentType(), formData.Bytes()),
+						)
+						t, _ := json.Marshal(result)
+						slog.Info("result", "result", string(t))
 						if err != nil {
 							slog.Info("error updating worker script", "error", err)
+							continue
 						}
 						slog.Info("done worker script", "functionID", target.FunctionID)
 						bus.Publish(&WorkerUpdatedEvent{
