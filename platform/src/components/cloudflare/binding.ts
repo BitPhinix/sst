@@ -16,7 +16,7 @@
  * @packageDocumentation
  */
 
-import { Input } from "../input";
+import type { Input } from "../input";
 
 export interface KvBinding {
   type: "kvNamespaceBindings";
@@ -61,6 +61,13 @@ export interface DurableObjectNamespaceBinding {
   };
 }
 
+export interface HyperdriveBinding {
+  type: "hyperdriveBindings";
+  properties: {
+    id: Input<string>;
+  };
+}
+
 export interface D1DatabaseBinding {
   type: "d1DatabaseBindings";
   properties: {
@@ -76,7 +83,8 @@ export type Binding =
   | QueueBinding
   | R2BucketBinding
   | D1DatabaseBinding
-  | DurableObjectNamespaceBinding;
+  | DurableObjectNamespaceBinding
+  | HyperdriveBinding;
 
 export function binding<T extends Binding["type"]>(input: Binding & {}) {
   return {

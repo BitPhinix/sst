@@ -19,6 +19,7 @@ var mapping = map[string]string{
 	"queueBindings":                  "Queue",
 	"serviceBindings":                "Service",
 	"durableObjectNamespaceBindings": "DurableObjectNamespace",
+	"hyperdriveBindings":             "Hyperdrive",
 }
 
 func Generate(root string, links common.Links) error {
