@@ -37,6 +37,7 @@ import {
   normalizeStorage,
 } from "./fargate.js";
 import { Dns } from "../dns.js";
+import { hashStringToPrettyString } from "../naming.js";
 
 type Port = `${number}/${"http" | "https" | "tcp" | "udp" | "tcp_udp" | "tls"}`;
 
@@ -121,6 +122,8 @@ interface ServiceRules {
      * If multiple `key` and `value` pairs are provided, it'll match requests with **any** of the
      * query string parameters.
      *
+     * @default Query string is not checked when forwarding requests.
+     *
      * @example
      *
      * For example, to match requests with query string `version=v1`.
@@ -163,8 +166,6 @@ interface ServiceRules {
      *   ]
      * }
      * ```
-     *
-     * @default Query string is not checked when forwarding requests.
      */
     query?: Input<
       Input<{
@@ -181,6 +182,42 @@ interface ServiceRules {
         value: Input<string>;
       }>[]
     >;
+    /**
+     * Configure header based routing. Only requests matching the header
+     * name and values are forwarded to the container.
+     *
+     * Both the header name and values are case insensitive.
+     *
+     * @default Header is not checked when forwarding requests.
+     *
+     * @example
+     *
+     * For example, if you specify `X-Custom-Header` as the name and `Value1`
+     * as a value, it will match requests with the header
+     * `x-custom-header: value1` as well.
+     *
+     * ```js
+     * {
+     *   header: {
+     *     name: "X-Custom-Header",
+     *     values: ["Value1", "Value2", "Prefix*"]
+     *   }
+     * }
+     * ```
+     */
+    header?: Input<{
+      /**
+       * The name of the HTTP header field to check. This is case-insensitive.
+       */
+      name: Input<string>;
+
+      /**
+       * The values to match against the header value. The rule matches if the
+       * request header matches any of these values. Values are case-insensitive
+       * and support wildcards (`*` and `?`) for pattern matching.
+       */
+      values: Input<Input<string>>[];
+    }>;
   }>;
 }
 
@@ -1338,9 +1375,16 @@ export interface ServiceArgs extends FargateBaseArgs {
  *
  * #### Create a Service
  *
+ * Services are run inside an ECS Cluster. If you haven't already, create one.
+ *
  * ```ts title="sst.config.ts"
  * const vpc = new sst.aws.Vpc("MyVpc");
  * const cluster = new sst.aws.Cluster("MyCluster", { vpc });
+ * ```
+ *
+ * Add the service to it.
+ *
+ * ```ts title="sst.config.ts"
  * const service = new sst.aws.Service("MyService", { cluster });
  * ```
  *
@@ -1418,8 +1462,8 @@ export interface ServiceArgs extends FargateBaseArgs {
  *
  * #### Add a load balancer
  *
- * You can also expose your service by adding a load balancer to it and optionally adding a
- * custom domain.
+ * You can also expose your service by adding a load balancer to it and optionally
+ * adding a custom domain.
  *
  * ```ts title="sst.config.ts"
  * new sst.aws.Service("MyService", {
@@ -1458,8 +1502,8 @@ export interface ServiceArgs extends FargateBaseArgs {
  *
  * #### Service discovery
  *
- * This component automatically creates a Cloud Map service host name for the service. So
- * anything in the same VPC can access it using the service's host name.
+ * This component automatically creates a Cloud Map service host name for the
+ * service. So anything in the same VPC can access it using the service's host name.
  *
  * For example, if you link the service to a Lambda function that's in the same VPC.
  *
@@ -1728,6 +1772,7 @@ export class Service extends Component implements Link.Linkable {
                 ? {
                     path: v.conditions?.path ?? v.path,
                     query: v.conditions?.query,
+                    header: v.conditions?.header,
                   }
                 : undefined;
             if (protocolType(listenProtocol) === "network" && listenConditions)
@@ -2025,9 +2070,10 @@ export class Service extends Component implements Link.Linkable {
             customRules.forEach(
               (r) =>
                 new lb.ListenerRule(
-                  `${name}Listener${listenerId}Rule${
-                    r.listenConditions!.path ?? ""
-                  }${r.listenConditions!.query ?? ""}`,
+                  `${name}Listener${listenerId}Rule${hashStringToPrettyString(
+                    JSON.stringify(r.listenConditions),
+                    4,
+                  )}`,
                   {
                     listenerArn: listener.arn,
                     actions: buildActions(r),
@@ -2037,6 +2083,12 @@ export class Service extends Component implements Link.Linkable {
                           ? { values: [r.listenConditions!.path!] }
                           : undefined,
                         queryStrings: r.listenConditions!.query,
+                        httpHeader: r.listenConditions!.header
+                          ? {
+                              httpHeaderName: r.listenConditions!.header.name,
+                              values: r.listenConditions!.header.values,
+                            }
+                          : undefined,
                       },
                     ],
                   },

@@ -1,50 +1,8 @@
-# Rust Function Url Example
+# SST Rust support
 
-This example uses [cargo lambda](https://www.cargo-lambda.info/) to build rust binaries and deploy them on a provided AL2 runtime
+SST uses [cargo lambda](https://www.cargo-lambda.info/) to build rust binaries and deploy them on AWS Lambda. You MUST install [cargo](https://rustup.rs/) and [cargo lambda](https://www.cargo-lambda.info/guide/installation.html) and [zig](https://ziglang.org/download/) (a cargo-lambda dependency which is automatically installed with cargo-lambda in most installation methods) on your own before using sst rust lambdas.
 
-NOTE: (cargo lambda relies on [zig](https://ziglang.org/), which it will prompt to install on first running a cargo lambda command)
-
-```sh
-cargo lambda build --release
-```
-
-you can also provide the architecture of choice
-
-```sh
-cargo lambda build --release --arm64
-# or
-cargo lambda build --release --x86-64
-```
-
-which can then be reflected in the `sst.config.ts`
-
-```ts
-const api = new sst.aws.Function("rust-api", {
-    architecture: "arm64", // or x86_64
-    ...
-});
-```
-
-by default, cargo lambda will build to a folder in `target/` called `lambda/`. The binary build will be called `bootstrap`, and it will be built in a sub folder which is the name of your binary.
-
-For example, a rust binary `src/bin/handlers/api.rs` will be built to `target/lambda/api/bootstrap`
-
-After building the binary, deploys can be done normally via `sst deploy --stage production`
-
-Other services can be orchestrated in a similar manner with cargo lambda, for example a cron:
-```ts
-new sst.aws.Cron('MyCron', {
-    schedule: 'cron(0 0 * * ? *)',
-    job: {
-        architecture: 'arm64',
-        runtime: 'provided.al2023',
-        handler: 'bootstrap',
-        bundle: 'target/lambda/my-cron',
-    }
-});
-```
-
-# GHA
+## Setup with Github Actions
 
 An example to deploy using github actions with `arm64` architecture, feel free to configure as needed
 
@@ -104,9 +62,6 @@ jobs:
           platform: linux
           arch: aarch64 # | x86_64
 
-      - name: cargo lint
-        run: cargo lint
-
       - name: pnpm install
         run: pnpm install --frozen-lockfile
 
@@ -114,11 +69,6 @@ jobs:
         run: |
           set -euxo pipefail
           pnpm sst install
-
-      - name: build lambdas
-        run: |
-          set -euxo pipefail
-          cargo lambda build --release --arm64
 
       - name: sst deploy
         run: |

@@ -184,6 +184,10 @@ export interface VpcArgs {
      */
     natInstance?: Transform<ec2.InstanceArgs>;
     /**
+     * Transform the EC2 NAT security group resource.
+     */
+    natSecurityGroup?: Transform<ec2.SecurityGroupArgs>;
+    /**
      * Transform the EC2 Elastic IP resource.
      */
     elasticIp?: Transform<ec2.EipArgs>;
@@ -367,7 +371,8 @@ export class Vpc extends Component implements Link.Linkable {
     const internetGateway = createInternetGateway();
     const securityGroup = createSecurityGroup();
     const { publicSubnets, publicRouteTables } = createPublicSubnets();
-    const { elasticIps, natGateways } = createNatGateways();
+    const elasticIps = createElasticIps();
+    const natGateways = createNatGateways();
     const natInstances = createNatInstances();
     const { privateSubnets, privateRouteTables } = createPrivateSubnets();
     const bastionInstance = createBastion();
@@ -803,41 +808,45 @@ export class Vpc extends Component implements Link.Linkable {
       );
     }
 
+    function createElasticIps() {
+      return publicSubnets.apply((subnets) =>
+        subnets.map(
+          (_, i) =>
+            new ec2.Eip(
+              ...transform(
+                args.transform?.elasticIp,
+                `${name}ElasticIp${i + 1}`,
+                {
+                  vpc: true,
+                },
+                { parent: self },
+              ),
+            ),
+        ),
+      );
+    }
+
     function createNatGateways() {
-      const ret = all([nat, publicSubnets]).apply(([nat, subnets]) => {
-        if (nat?.type !== "managed") return [];
+      return all([nat, publicSubnets, elasticIps]).apply(
+        ([nat, subnets, elasticIps]) => {
+          if (nat?.type !== "managed") return [];
 
-        return subnets.map((subnet, i) => {
-          const elasticIp = new ec2.Eip(
-            ...transform(
-              args.transform?.elasticIp,
-              `${name}ElasticIp${i + 1}`,
-              {
-                vpc: true,
-              },
-              { parent: self },
-            ),
+          return subnets.map(
+            (subnet, i) =>
+              new ec2.NatGateway(
+                ...transform(
+                  args.transform?.natGateway,
+                  `${name}NatGateway${i + 1}`,
+                  {
+                    subnetId: subnet.id,
+                    allocationId: elasticIps[i].id,
+                  },
+                  { parent: self },
+                ),
+              ),
           );
-
-          const natGateway = new ec2.NatGateway(
-            ...transform(
-              args.transform?.natGateway,
-              `${name}NatGateway${i + 1}`,
-              {
-                subnetId: subnet.id,
-                allocationId: elasticIp.id,
-              },
-              { parent: self },
-            ),
-          );
-          return { elasticIp, natGateway };
-        });
-      });
-
-      return {
-        elasticIps: ret.apply((ret) => ret.map((r) => r.elasticIp)),
-        natGateways: ret.apply((ret) => ret.map((r) => r.natGateway)),
-      };
+        },
+      );
     }
 
     function createNatInstances() {
@@ -845,27 +854,30 @@ export class Vpc extends Component implements Link.Linkable {
         if (nat?.type !== "ec2") return output([]);
 
         const sg = new ec2.SecurityGroup(
-          `${name}NatInstanceSecurityGroup`,
-          {
-            vpcId: vpc.id,
-            ingress: [
-              {
-                protocol: "-1",
-                fromPort: 0,
-                toPort: 0,
-                cidrBlocks: ["0.0.0.0/0"],
-              },
-            ],
-            egress: [
-              {
-                protocol: "-1",
-                fromPort: 0,
-                toPort: 0,
-                cidrBlocks: ["0.0.0.0/0"],
-              },
-            ],
-          },
-          { parent: self },
+          ...transform(
+            args.transform?.natSecurityGroup,
+            `${name}NatInstanceSecurityGroup`,
+            {
+              vpcId: vpc.id,
+              ingress: [
+                {
+                  protocol: "-1",
+                  fromPort: 0,
+                  toPort: 0,
+                  cidrBlocks: ["0.0.0.0/0"],
+                },
+              ],
+              egress: [
+                {
+                  protocol: "-1",
+                  fromPort: 0,
+                  toPort: 0,
+                  cidrBlocks: ["0.0.0.0/0"],
+                },
+              ],
+            },
+            { parent: self },
+          ),
         );
 
         const role = new iam.Role(
@@ -918,34 +930,43 @@ export class Vpc extends Component implements Link.Linkable {
             { parent: self },
           ).id;
 
-        return all([zones, publicSubnets, keyPair, args.bastion]).apply(
-          ([zones, publicSubnets, keyPair, bastion]) =>
-            zones.map(
-              (_, i) =>
-                new ec2.Instance(
-                  ...transform(
-                    args.transform?.natInstance,
-                    `${name}NatInstance${i + 1}`,
-                    {
-                      instanceType: nat.ec2.instance,
-                      ami,
-                      subnetId: publicSubnets[i].id,
-                      vpcSecurityGroupIds: [sg.id],
-                      iamInstanceProfile: instanceProfile.name,
-                      sourceDestCheck: false,
-                      keyName: keyPair?.keyName,
-                      tags: {
-                        Name: `${name} NAT Instance`,
-                        "sst:is-nat": "true",
-                        ...(bastion && i === 0
-                          ? { "sst:is-bastion": "true" }
-                          : {}),
-                      },
-                    },
-                    { parent: self },
-                  ),
-                ),
-            ),
+        return all([
+          zones,
+          publicSubnets,
+          elasticIps,
+          keyPair,
+          args.bastion,
+        ]).apply(([zones, publicSubnets, elasticIps, keyPair, bastion]) =>
+          zones.map((_, i) => {
+            const instance = new ec2.Instance(
+              ...transform(
+                args.transform?.natInstance,
+                `${name}NatInstance${i + 1}`,
+                {
+                  instanceType: nat.ec2.instance,
+                  ami,
+                  subnetId: publicSubnets[i].id,
+                  vpcSecurityGroupIds: [sg.id],
+                  iamInstanceProfile: instanceProfile.name,
+                  sourceDestCheck: false,
+                  keyName: keyPair?.keyName,
+                  tags: {
+                    Name: `${name} NAT Instance`,
+                    "sst:is-nat": "true",
+                    ...(bastion && i === 0 ? { "sst:is-bastion": "true" } : {}),
+                  },
+                },
+                { parent: self },
+              ),
+            );
+
+            new ec2.EipAssociation(`${name}NatInstanceEipAssociation${i + 1}`, {
+              instanceId: instance.id,
+              allocationId: elasticIps[i].id,
+            });
+
+            return instance;
+          }),
         );
       });
     }

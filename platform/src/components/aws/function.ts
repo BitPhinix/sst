@@ -43,6 +43,7 @@ import { RandomBytes } from "@pulumi/random";
 import { lazy } from "../../util/lazy.js";
 import { Efs } from "./efs.js";
 import { FunctionEnvironmentUpdate } from "./providers/function-environment-update.js";
+import { warnOnce } from "../../util/warn.js";
 
 /**
  * Helper type to define function ARN type
@@ -82,8 +83,6 @@ export type FunctionPermissionArgs = {
    */
   resources: Input<string>[];
 };
-
-export type FunctionEnvironmentArgs = Record<string, Input<string>>;
 
 interface FunctionUrlCorsArgs {
   /**
@@ -283,8 +282,8 @@ export interface FunctionArgs {
    * Currently supports Node.js and Golang functions.
    * :::
    *
-   * Currently supports **Node.js** and **Golang** functions. Python is community supported
-   * and is currently a work in progress. Other runtimes are on the roadmap.
+   * Currently supports **Node.js**, and **Golang** functions. Python and Rust are community
+   * supported and currently are a work in progress. Other runtimes are on the roadmap.
    *
    * @default `"nodejs20.x"`
    *
@@ -300,6 +299,7 @@ export interface FunctionArgs {
     | "nodejs20.x"
     | "nodejs22.x"
     | "go"
+    | "rust"
     | "provided.al2023"
     | "python3.9"
     | "python3.10"
@@ -334,6 +334,7 @@ export interface FunctionArgs {
    *
    * - For Node.js this is in the format `{path}/{file}.{method}`.
    * - For Golang this is `{path}` to the Go module.
+   * - For Rust this is `{path}` to the Rust crate.
    *
    * @example
    *
@@ -373,6 +374,17 @@ export interface FunctionArgs {
    * includes the name of the module in your `go.mod`. So in this case your `go.mod`
    * might be in `packages/functions/go` and `some_module` is the name of the
    * module.
+   *
+   * For Rust, it might look like this.
+   *
+   * ```js
+   * {
+   *   handler: "crates/api"
+   * }
+   * ```
+   *
+   * Where `crates/api` is the path to the Rust crate. This means there is a
+   * `Cargo.toml` file in `crates/api`, and the main() function handles the lambda.
    */
   handler: Input<string>;
   /**
@@ -500,14 +512,14 @@ export interface FunctionArgs {
    */
   permissions?: Input<Prettify<FunctionPermissionArgs>[]>;
   /**
-   * Policies to attach to the function. These policies will be added to the function's IAM
-   * role.
+   * Policies to attach to the function. These policies will be added to the
+   * function's IAM role.
    *
-   * Attaching policies lets you grant a set of predefined permissions to the function without
-   * having to specify the permissions in the `permissions` prop.
+   * Attaching policies lets you grant a set of predefined permissions to the
+   * function without having to specify the permissions in the `permissions` prop.
    *
    * @example
-   * Allow the function to have read-only access to all resources.
+   * For example, allow the function to have read-only access to all resources.
    * ```js
    * {
    *   policies: ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
@@ -736,6 +748,7 @@ export interface FunctionArgs {
    */
   nodejs?: Input<{
     /**
+     * @internal
      * Point to a file that exports a list of esbuild plugins to use.
      *
      * @example
@@ -1148,12 +1161,25 @@ export interface FunctionArgs {
    * Configure the function to connect to private subnets in a virtual private cloud or VPC. This allows your function to access private resources.
    *
    * @example
+   * Create a `Vpc` component.
+   *
+   * ```js title="sst.config.ts"
+   * const myVpc = new sst.aws.Vpc("MyVpc");
+   * ```
+   *
+   * Or reference an existing VPC.
+   *
+   * ```js title="sst.config.ts"
+   * const myVpc = sst.aws.Vpc.get("MyVpc", {
+   *   id: "vpc-12345678901234567"
+   * });
+   * ```
+   *
+   * And pass it in.
+   *
    * ```js
    * {
-   *   vpc: {
-   *     privateSubnets: ["subnet-0b6a2b73896dc8c4c", "subnet-021389ebee680c2f0"]
-   *     securityGroups: ["sg-0399348378a4c256c"],
-   *   }
+   *   vpc: myVpc
    * }
    * ```
    */
@@ -1212,8 +1238,8 @@ export interface FunctionArgs {
  *
  * #### Supported runtimes
  *
- * Currently supports **Node.js** and **Golang** functions. Python is community supported and is
- * currently a work in progress. Other runtimes are on the roadmap.
+ * Currently supports **Node.js** and **Golang** functions. Python and Rust are community
+ * supported and are currently a work in progress. Other runtimes are on the roadmap.
  *
  * @example
  *
@@ -1237,6 +1263,16 @@ export interface FunctionArgs {
  *   new sst.aws.Function("MyFunction", {
  *     runtime: "go",
  *     handler: "./src"
+ *   });
+ *   ```
+ *   </TabItem>
+ *   <TabItem label="Rust">
+ *   Pass in the directory where your Cargo.toml lives.
+ *
+ *   ```ts title="sst.config.ts"
+ *   new sst.aws.Function("MyFunction", {
+ *     runtime: "runtime",
+ *     handler: "./crates/api/"
  *   });
  *   ```
  *   </TabItem>
@@ -1286,6 +1322,18 @@ export interface FunctionArgs {
  *   )
  *
  *   resource.Get("MyBucket", "name")
+ *   ```
+ *   </TabItem>
+ *   <TabItem label="Rust">
+ *   ```rust title="src/main.rs"
+ *   use sst_sdk::Resource;
+ *   #[derive(serde::Deserialize, Debug)]
+ *   struct Bucket {
+ *      name: String,
+ *   }
+ *
+ *   let resource = Resource::init().unwrap();
+ *   let Bucket { name } = resource.get("Bucket").unwrap();
  *   ```
  *   </TabItem>
  * </Tabs>
@@ -1617,12 +1665,13 @@ export class Function extends Component implements Link.Linkable {
           securityGroups: args.vpc.securityGroups,
         };
         return all([
+          args.vpc.id,
           args.vpc.nodes.natGateways,
           args.vpc.nodes.natInstances,
-        ]).apply(([natGateways, natInstances]) => {
+        ]).apply(([id, natGateways, natInstances]) => {
           if (natGateways.length === 0 && natInstances.length === 0) {
-            throw new VisibleError(
-              `Functions that are running in a VPC need a NAT gateway. Enable it by setting "nat" on the "sst.aws.Vpc" component.`,
+            warnOnce(
+              `\nWarning: One or more functions are deployed in the "${id}" VPC, which does not have a NAT gateway. As a result, these functions cannot access the internet. If your functions need internet access, enable it by setting "nat": true on the "Vpc" component.\n`,
             );
           }
           return result;
@@ -2183,7 +2232,7 @@ export class Function extends Component implements Link.Linkable {
                     s3Key: zipAsset!.key,
                     handler: unsecret(handler),
                     runtime: runtime.apply((v) =>
-                      v === "go" ? "provided.al2023" : v,
+                      v === "go" || v === "rust" ? "provided.al2023" : v,
                     ),
                   }),
             },
@@ -2327,7 +2376,7 @@ export class Function extends Component implements Link.Linkable {
    * });
    * ```
    */
-  public addEnvironment(environment: FunctionEnvironmentArgs) {
+  public addEnvironment(environment: Input<Record<string, Input<string>>>) {
     return new FunctionEnvironmentUpdate(
       `${this.constructorName}EnvironmentUpdate`,
       {
