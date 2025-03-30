@@ -9,4 +9,5 @@ export * from "./account-id";
 export * from "./auth";
 export * from "./queue";
 export * from "./cron";
+export * from "./cloudflare5Worker";
 export { binding } from "./binding.js";
