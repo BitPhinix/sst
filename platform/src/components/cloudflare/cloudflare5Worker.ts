@@ -9,7 +9,7 @@ import {
   jsonStringify,
   output,
 } from "@pulumi/pulumi";
-import * as cloudflare5 from "@sst-provider/cloudflare5";
+import * as cloudflare5 from "@bitphinix/sst-provider-cloudflare5";
 import type { BuildOptions, Loader } from "esbuild";
 import type { Permission } from "../aws/permission.js";
 import { Component, type Transform, transform } from "../component";
@@ -21,6 +21,7 @@ import { DEFAULT_ACCOUNT_ID } from "./account-id.js";
 import { type Binding, binding } from "./binding.js";
 import { WorkerUrl } from "./providers/worker-url.js";
 import { ZoneLookup } from "./providers/zone-lookup.js";
+import crypto from "node:crypto";
 
 export function durableObjectNamespace(
   name: string,
@@ -437,9 +438,8 @@ export class Cloudflare5Worker extends Component implements Link.Linkable {
                 scriptName: "",
                 accountId: DEFAULT_ACCOUNT_ID,
                 mainModule: "worker.js",
-                content: (
-                  await fs.readFile(path.join(build.out, build.handler))
-                ).toString(),
+                contentFile: path.join(build.out, build.handler),
+                contentSha256: crypto.createHash("sha256").update(await fs.readFile(path.join(build.out, build.handler))).digest("hex"),
                 compatibilityDate: "2024-09-23",
                 compatibilityFlags: ["nodejs_compat"],
                 bindings: [

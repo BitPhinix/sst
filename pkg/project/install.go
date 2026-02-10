@@ -266,6 +266,7 @@ func FindProvider(name string, version string) (*ProviderLockEntry, error) {
 		if alias == "" || alias == "terraform-provider" {
 			alias = pkg.Name
 			alias = strings.ReplaceAll(alias, "@sst-provider", "")
+			alias = strings.ReplaceAll(alias, "@bitphinix/sst-provider-", "")
 			alias = strings.ReplaceAll(alias, "/", "")
 			alias = strings.ReplaceAll(alias, "@", "")
 			alias = strings.ReplaceAll(alias, "pulumi", "")
