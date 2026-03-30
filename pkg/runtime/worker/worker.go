@@ -47,7 +47,7 @@ func New() *Runtime {
 		contexts: map[string]esbuild.BuildContext{},
 		results:  map[string]esbuild.BuildResult{},
 		lock:     sync.RWMutex{},
-		unenv:    &unenv,
+		// unenv:    &unenv,
 	}
 }
 
@@ -102,8 +102,8 @@ func (w *Runtime) Build(ctx context.Context, input *runtime.BuildInput) (*runtim
 		NodePaths: []string{
 			filepath.Join(path.ResolvePlatformDir(input.CfgPath), "node_modules"),
 		},
-		Alias:             w.unenv.Alias,
-		Inject:            w.unenv.Polyfill,
+		Alias:             map[string]string{},
+		Inject:            []string{},
 		External:          []string{"node:*", "cloudflare:workers"},
 		Conditions:        []string{"workerd", "worker", "browser"},
 		Sourcemap:         esbuild.SourceMapNone,
